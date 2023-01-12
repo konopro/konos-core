@@ -23,6 +23,7 @@ export async function run() {
     },
     boolean: ["version"],
   });
+  console.log(args);
   try {
     await new Service({ plugins: [require.resolve("./version")] }).run({
       name: args._[0],
