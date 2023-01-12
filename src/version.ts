@@ -1,4 +1,5 @@
 export default (api: any) => {
+  console.log("执行了 version 插件");
   api.registerCommand({
     name: "version",
     alias: "v",
