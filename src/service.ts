@@ -1,8 +1,23 @@
 import { yParser } from "@umijs/utils";
+import { AsyncSeriesWaterfallHook } from "tapable";
+
+const proxyPluginAPI = (opts: { pluginApi: PluginAPI; service: Service }) => {
+  return new Proxy(opts.pluginApi, {
+    get: (target, prop: string) => {
+      if (opts.service.pluginMethods[prop]) {
+        return opts.service.pluginMethods[prop].fn;
+      }
+      // @ts-ignore
+      return target[prop];
+    },
+  });
+};
 
 export class Service {
   commands: any = {};
   opts = {};
+  hooks: Record<string, Hook[]> = {};
+  pluginMethods: Record<string, { plugin: string; fn: Function }> = {};
   constructor(opts?: any) {
     this.opts = opts;
   }
@@ -19,8 +34,28 @@ export class Service {
   }
   async initPlugin(opts: { plugin: any }) {
     const ret = await this.getPlugin(opts.plugin);
-    const pluginApi = new PluginAPI({ service: this });
-    ret(pluginApi);
+    const pluginApi = new PluginAPI({ service: this, plugin: opts.plugin });
+    const proxyAPI = proxyPluginAPI({
+      pluginApi,
+      service: this,
+    });
+    ret(proxyAPI);
+  }
+
+  applyPlugins<T>(opts: { key: string; args?: any }): Promise<T> | T {
+    const hooks = this.hooks[opts.key] || [];
+    const tEvent = new AsyncSeriesWaterfallHook(["_"]);
+    for (const hook of hooks) {
+      tEvent.tapPromise(
+        {
+          name: hook.plugin,
+        },
+        async () => {
+          await hook.fn(opts.args);
+        }
+      );
+    }
+    return tEvent.promise(1) as Promise<T>;
   }
 
   async run(opts: { name: string; args?: any }) {
@@ -33,7 +68,14 @@ export class Service {
     if (!command) {
       throw Error(`命令 ${name} 执行失败，因为它没有定义。`);
     }
+    // console.log(this.hooks);
+    await this.applyPlugins({
+      key: "onStart",
+    });
     let ret = await command.fn({ args });
+    await this.applyPlugins({
+      key: "onEnd",
+    });
     return ret;
   }
 }
@@ -51,8 +93,28 @@ export interface IOpts {
 
 class PluginAPI {
   service: Service;
-  constructor(opts: { service: Service }) {
+  plugin: string;
+  constructor(opts: { service: Service; plugin: string }) {
     this.service = opts.service;
+    this.plugin = opts.plugin;
+  }
+  register(opts: Omit<IHookOpts, "plugin">) {
+    this.service.hooks[opts.key] ||= [];
+    this.service.hooks[opts.key].push(
+      new Hook({ ...opts, plugin: this.plugin })
+    );
+  }
+  registerMethod(opts: { name: string }) {
+    this.service.pluginMethods[opts.name] = {
+      plugin: this.plugin,
+      fn: function (fn: Function | Object) {
+        // @ts-ignore
+        this.register({
+          key: opts.name,
+          fn,
+        });
+      },
+    };
   }
   registerCommand(opts: IOpts) {
     const { alias } = opts;
@@ -65,5 +127,22 @@ class PluginAPI {
     if (alias) {
       registerCommand({ ...opts, name: alias });
     }
+  }
+}
+
+export interface IHookOpts {
+  key: string;
+  plugin: string;
+  fn: Function;
+}
+
+export class Hook {
+  key: string;
+  fn: Function;
+  plugin: string;
+  constructor(opts: IHookOpts) {
+    this.key = opts.key;
+    this.fn = opts.fn;
+    this.plugin = opts.plugin;
   }
 }

@@ -25,7 +25,14 @@ export async function run() {
   });
   console.log(args);
   try {
-    await new Service({ plugins: [require.resolve("./version")] }).run({
+    await new Service({
+      plugins: [
+        require.resolve("./onstart"),
+        require.resolve("./onend"),
+        require.resolve("./version"),
+        require.resolve("./other"),
+      ],
+    }).run({
       name: args._[0],
       args,
     });
