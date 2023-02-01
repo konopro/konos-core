@@ -1,7 +1,11 @@
-import { yParser } from "@umijs/utils";
+import { yParser, register } from "@umijs/utils";
 import { AsyncSeriesWaterfallHook } from "tapable";
+import esbuild from "esbuild";
 
-const proxyPluginAPI = (opts: { pluginApi: PluginAPI; service: Service }) => {
+export const proxyPluginAPI = (opts: {
+  pluginApi: PluginAPI;
+  service: Service;
+}) => {
   return new Proxy(opts.pluginApi, {
     get: (target, prop: string) => {
       if (opts.service.pluginMethods[prop]) {
@@ -24,11 +28,18 @@ export class Service {
   async getPlugin(plugin: string) {
     let ret;
     try {
+      register.register({
+        implementor: esbuild,
+        exts: [".ts"],
+      });
+      register.clearFiles();
       ret = require(plugin);
     } catch (e: any) {
       throw new Error(
         `插件 ${plugin} 获取失败，可能是文件路径错误，详情日志为 ${e.message}`
       );
+    } finally {
+      register.restore();
     }
     return ret.__esModule ? ret.default : ret;
   }
